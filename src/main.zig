@@ -1,5 +1,9 @@
 const std = @import("std");
+const windows = @cImport({
+    @cInclude("windows.h");
+});
 
 pub fn main() !void {
-    std.debug.print("Hello, World!\n", .{});
+    _ = windows.GetModuleHandleW(null);
+    std.debug.print("Hello, world!\n", .{});
 }
