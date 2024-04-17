@@ -3,24 +3,34 @@ const windows = @cImport({
     @cInclude("windows.h");
 });
 
-fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.BOOL {
+const wm_log = std.log.scoped(.winman);
+
+fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.WINBOOL {
     _ = lparam;
-    const length = windows.GetWindowTextLength(hwnd);
-    var gpa = std.heap.GeneralPurposeAllocator();
-    defer gpa.deinit();
+    const length = windows.GetWindowTextLengthA(hwnd);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const buffer = try allocator.alloc(u8, length + 1);
+    const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
     defer allocator.free(buffer);
-    const windowTitle = @as([]const u8, buffer[0..length]);
 
-    std.log.info("{s}\n", .{windowTitle});
+    _ = windows.GetWindowTextA(hwnd, buffer.ptr, @intCast(buffer.len));
 
+    const text: []const u8 = buffer[0..];
+
+    if (windows.IsWindowVisible(hwnd) == windows.TRUE and length != 0) {
+        wm_log.info("buff: {*} {d} {s}\n", .{ buffer.ptr, buffer.len, text });
+    }
     return windows.TRUE;
 }
 
 pub fn main() !void {
+    wm_log.info("Enumerating windows...\n", .{});
     const result = windows.EnumWindows(callback, 0);
 
-    std.log.info("{any}\n", .{result});
+    if (result == windows.FALSE) {
+        wm_log.err("Failed to enumerate windows\n", .{});
+        return error.EnumerateWindowsFailed;
+    }
 }
