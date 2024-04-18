@@ -15,12 +15,24 @@ fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.WIN
     const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
     defer allocator.free(buffer);
 
+    const info_buffer = allocator.alloc(windows.WINDOWINFO, 1) catch unreachable;
+    defer allocator.free(info_buffer);
+
+    var i: u32 = 0;
+    const j: u32 = 0;
+
+    _ = windows.GetWindowThreadProcessId(hwnd, &i);
+    _ = windows.GetWindow(hwnd, j);
+
     _ = windows.GetWindowTextA(hwnd, buffer.ptr, @intCast(buffer.len));
 
     const text: []const u8 = buffer[0..];
 
     if (windows.IsWindowVisible(hwnd) == windows.TRUE and length != 0) {
-        wm_log.info("buff: {*} {d} {s}\n", .{ buffer.ptr, buffer.len, text });
+        wm_log.info("buff: {d} {s} {d}\n", .{ j, text, i });
+        if (i == 39384) {
+            // _ = windows.SetForegroundWindow(hwnd);
+        }
     }
     return windows.TRUE;
 }
