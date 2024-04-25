@@ -3,27 +3,105 @@ const windows = @cImport({
     @cInclude("windows.h");
 });
 
-pub const SERVICE_NAME: [*c]u8 = @constCast("ZigService");
+var service_status: windows.SERVICE_STATUS = undefined;
+var h_status: windows.SERVICE_STATUS_HANDLE = undefined;
 
-fn MessageBoxA(
-    hWnd: ?windows.HWND,
-    lpText: [*c]const u8,
-    lpCaption: [*c]const u8,
-    uType: u32,
-) callconv(.C) c_int {
-    _ = hWnd;
-    _ = lpText;
-    _ = lpCaption;
-    _ = uType;
-
-    return 0;
-}
+const SERVICE_NAME = "WinMan";
 
 const wm_log = std.log.scoped(.winman);
 
 const state_list = struct {
     pid: []i32,
 };
+
+fn serviceMain(argc: c_ulong, argv: [*c][*c]u8) callconv(.C) void {
+    _ = argc;
+    _ = argv;
+    service_status.dwServiceType = windows.SERVICE_WIN32;
+    service_status.dwCurrentState = windows.SERVICE_START_PENDING;
+    service_status.dwControlsAccepted = windows.SERVICE_ACCEPT_STOP | windows.SERVICE_ACCEPT_SHUTDOWN;
+    service_status.dwWin32ExitCode = 0;
+    service_status.dwServiceSpecificExitCode = 0;
+    service_status.dwCheckPoint = 0;
+    service_status.dwWaitHint = 0;
+
+    h_status = windows.RegisterServiceCtrlHandlerExA(
+        SERVICE_NAME,
+        @as(windows.LPHANDLER_FUNCTION_EX, controlHandler),
+        null,
+    );
+
+    run();
+}
+
+fn controlHandler(request: windows.DWORD, _: windows.DWORD, _: windows.LPVOID, _: windows.LPVOID) callconv(.C) windows.DWORD {
+    switch (request) {
+        windows.SERVICE_CONTROL_STOP => {
+            service_status.dwCurrentState = windows.SERVICE_STOP;
+            service_status.dwWin32ExitCode = 0;
+
+            _ = windows.SetServiceStatus(h_status, &service_status);
+            return 0;
+        },
+        windows.SERVICE_CONTROL_SHUTDOWN => {
+            service_status.dwCurrentState = windows.SERVICE_STOP;
+            service_status.dwWin32ExitCode = 0;
+
+            _ = windows.SetServiceStatus(h_status, &service_status);
+            return 0;
+        },
+        else => {},
+    }
+
+    _ = windows.SetServiceStatus(h_status, &service_status);
+
+    return 0;
+}
+
+fn run() callconv(.C) void {
+    service_status.dwCurrentState = windows.SERVICE_RUNNING;
+    _ = windows.SetServiceStatus(h_status, &service_status);
+
+    // const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+
+    const curr_win = windows.GetForegroundWindow();
+
+    if (curr_win == null) {
+        wm_log.err("Failed to get current window\n", .{});
+        return;
+    }
+
+    const length = windows.GetWindowTextLengthA(curr_win);
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
+    defer allocator.free(buffer);
+
+    var i: u32 = 0;
+
+    _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
+    _ = windows.GetWindowThreadProcessId(curr_win, &i);
+
+    var file = std.fs.cwd().createFile("test.txt", .{ .read = true }) catch unreachable;
+    defer file.close();
+
+    file.writeAll(buffer) catch unreachable;
+    while (service_status.dwCurrentState == windows.SERVICE_RUNNING) {
+        const key: i16 = windows.GetAsyncKeyState(windows.VK_LMENU);
+
+        if (key < 0) {
+            if (key == 'a') {
+                // state_list = .{ .pid = &[_]i32{39384} };
+            }
+
+            stdout.writeAll("down\n") catch unreachable;
+        }
+    }
+}
 
 fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.WINBOOL {
     _ = lparam;
@@ -54,72 +132,15 @@ fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.WIN
             // _ = windows.SetForegroundWindow(hwnd);
         }
     }
+
     return windows.TRUE;
 }
 
-fn ServiceMain(argc: c_ulong, argv: [*c][*c]u8) callconv(.C) void {
-    _ = argc;
-    _ = argv;
-    MessageBoxA(null, "Hello from Zig Windows Service!", "Zig Windows Service", 0);
-}
-
 pub fn main() !void {
-    // var service_table: [2]windows.SERVICE_TABLE_ENTRYA = undefined;
-    // service_table[0] = windows.SERVICE_TABLE_ENTRYA{ .lpServiceName = SERVICE_NAME, .lpServiceProc = ServiceMain };
-    // service_table[1] = windows.SERVICE_TABLE_ENTRY{
-    //     .lpServiceName = null,
-    //     .lpServiceProc = null,
-    // };
-    //
-    // if (windows.StartServiceCtrlDispatcherA(&service_table[0]) == 0) {
-    //     const err = windows.GetLastError();
-    //     wm_log.warn("StartServiceCtrlDispatcherA failed with error: {}\n", .{err});
-    //     return;
-    // }
-    //
-    // const curr_win = windows.GetForegroundWindow();
-    //
-    // if (curr_win == null) {
-    //     wm_log.err("Failed to get current window\n", .{});
-    //     return error.GetCurrentWindowFailed;
-    // }
-    //
-    // const length = windows.GetWindowTextLengthA(curr_win);
-    //
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer _ = gpa.deinit();
-    // const allocator = gpa.allocator();
-    //
-    // const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
-    // defer allocator.free(buffer);
-    //
-    // var i: u32 = 0;
-    //
-    // _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
-    // _ = windows.GetWindowThreadProcessId(curr_win, &i);
-    //
-    // wm_log.info("pid: {d}, title: {s}\n", .{ i, buffer });
+    var service_table = [_]windows.SERVICE_TABLE_ENTRY{
+        .{ .lpServiceName = @constCast(SERVICE_NAME), .lpServiceProc = serviceMain },
+        .{ .lpServiceName = null, .lpServiceProc = null },
+    };
 
-    // var char: u8 = undefined;
-    // const stdin = std.io.getStdIn().reader();
-    const stdout = std.io.getStdOut().writer();
-
-    // const key_state = enum(i8) {
-    //     dfault = 0,
-    //     up = 1,
-    //     down = -127,
-    //     toggle = -128,
-    // };
-
-    while (true) {
-        const key: i16 = windows.GetAsyncKeyState(windows.VK_LMENU);
-
-        if (key < 0) {
-            if (key == 'a') {
-                // state_list = .{ .pid = &[_]i32{39384} };
-            }
-
-            try stdout.writeAll("down\n");
-        }
-    }
+    _ = windows.StartServiceCtrlDispatcherA(&service_table[0]);
 }
