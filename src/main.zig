@@ -62,35 +62,31 @@ fn run() callconv(.C) void {
     service_status.dwCurrentState = windows.SERVICE_RUNNING;
     _ = windows.SetServiceStatus(h_status, &service_status);
 
-    // const stdin = std.io.getStdIn().reader();
-    const stdout = std.io.getStdOut().writer();
-
-    const curr_win = windows.GetForegroundWindow();
-
-    if (curr_win == null) {
-        wm_log.err("Failed to get current window\n", .{});
-        return;
-    }
-
-    const length = windows.GetWindowTextLengthA(curr_win);
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-
-    const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
-    defer allocator.free(buffer);
-
-    var i: u32 = 0;
-
-    _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
-    _ = windows.GetWindowThreadProcessId(curr_win, &i);
-
-    var file = std.fs.cwd().createFile("test.txt", .{ .read = true }) catch unreachable;
-    defer file.close();
-
-    file.writeAll(buffer) catch unreachable;
     while (service_status.dwCurrentState == windows.SERVICE_RUNNING) {
+        // const stdin = std.io.getStdIn().reader();
+        const stdout = std.io.getStdOut().writer();
+
+        const curr_win = windows.GetForegroundWindow();
+
+        if (curr_win == null) {
+            wm_log.err("Failed to get current window\n", .{});
+            return;
+        }
+
+        const length = windows.GetWindowTextLengthA(curr_win);
+
+        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        defer _ = gpa.deinit();
+        const allocator = gpa.allocator();
+
+        const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
+        defer allocator.free(buffer);
+
+        var i: u32 = 0;
+
+        _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
+        _ = windows.GetWindowThreadProcessId(curr_win, &i);
+
         const key: i16 = windows.GetAsyncKeyState(windows.VK_LMENU);
 
         if (key < 0) {
