@@ -14,26 +14,6 @@ const state_list = struct {
     pid: []i32,
 };
 
-fn serviceMain(argc: c_ulong, argv: [*c][*c]u8) callconv(.C) void {
-    _ = argc;
-    _ = argv;
-    service_status.dwServiceType = windows.SERVICE_WIN32;
-    service_status.dwCurrentState = windows.SERVICE_START_PENDING;
-    service_status.dwControlsAccepted = windows.SERVICE_ACCEPT_STOP | windows.SERVICE_ACCEPT_SHUTDOWN;
-    service_status.dwWin32ExitCode = 0;
-    service_status.dwServiceSpecificExitCode = 0;
-    service_status.dwCheckPoint = 0;
-    service_status.dwWaitHint = 0;
-
-    h_status = windows.RegisterServiceCtrlHandlerExA(
-        SERVICE_NAME,
-        @as(windows.LPHANDLER_FUNCTION_EX, controlHandler),
-        null,
-    );
-
-    run();
-}
-
 fn controlHandler(request: windows.DWORD, _: windows.DWORD, _: windows.LPVOID, _: windows.LPVOID) callconv(.C) windows.DWORD {
     switch (request) {
         windows.SERVICE_CONTROL_STOP => {
@@ -62,31 +42,46 @@ fn run() callconv(.C) void {
     service_status.dwCurrentState = windows.SERVICE_RUNNING;
     _ = windows.SetServiceStatus(h_status, &service_status);
 
+    const stdout = std.io.getStdOut().writer();
+
+    const curr_win = windows.GetForegroundWindow();
+
+    std.debug.print("Current window: {any}\n", .{curr_win});
+
+    if (curr_win == null) {
+        wm_log.err("Failed to get current window\n", .{});
+        return;
+    }
+
+    const length = windows.GetWindowTextLengthA(curr_win);
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
+    defer allocator.free(buffer);
+
+    var i: u32 = 0;
+
+    _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
+    _ = windows.GetWindowThreadProcessId(curr_win, &i);
+
+    var file: std.fs.File = undefined;
+
+    if (std.fs.cwd().statFile("winman-log.txt")) |_| {
+        file = std.fs.cwd().openFile("winman-log.txt", .{}) catch unreachable;
+    } else |err| switch (err) {
+        error.FileNotFound => {
+            file = std.fs.cwd().createFile("winman-log.txt", .{}) catch unreachable;
+        },
+        else => {},
+    }
+
+    defer file.close();
+
+    file.writeAll(buffer) catch unreachable;
     while (service_status.dwCurrentState == windows.SERVICE_RUNNING) {
-        // const stdin = std.io.getStdIn().reader();
-        const stdout = std.io.getStdOut().writer();
-
-        const curr_win = windows.GetForegroundWindow();
-
-        if (curr_win == null) {
-            wm_log.err("Failed to get current window\n", .{});
-            return;
-        }
-
-        const length = windows.GetWindowTextLengthA(curr_win);
-
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
-
-        const buffer = allocator.alloc(u8, @intCast(length + 1)) catch unreachable;
-        defer allocator.free(buffer);
-
-        var i: u32 = 0;
-
-        _ = windows.GetWindowTextA(curr_win, buffer.ptr, @intCast(buffer.len));
-        _ = windows.GetWindowThreadProcessId(curr_win, &i);
-
         const key: i16 = windows.GetAsyncKeyState(windows.VK_LMENU);
 
         if (key < 0) {
@@ -130,6 +125,26 @@ fn callback(hwnd: windows.HWND, lparam: windows.LPARAM) callconv(.C) windows.WIN
     }
 
     return windows.TRUE;
+}
+
+fn serviceMain(argc: c_ulong, argv: [*c][*c]u8) callconv(.C) void {
+    _ = argc;
+    _ = argv;
+    service_status.dwServiceType = windows.SERVICE_WIN32;
+    service_status.dwCurrentState = windows.SERVICE_START_PENDING;
+    service_status.dwControlsAccepted = windows.SERVICE_ACCEPT_STOP | windows.SERVICE_ACCEPT_SHUTDOWN;
+    service_status.dwWin32ExitCode = 0;
+    service_status.dwServiceSpecificExitCode = 0;
+    service_status.dwCheckPoint = 0;
+    service_status.dwWaitHint = 0;
+
+    h_status = windows.RegisterServiceCtrlHandlerExA(
+        SERVICE_NAME,
+        @as(windows.LPHANDLER_FUNCTION_EX, controlHandler),
+        null,
+    );
+
+    run();
 }
 
 pub fn main() !void {
